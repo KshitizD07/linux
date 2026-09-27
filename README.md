@@ -1,6 +1,6 @@
 # 🐧 Linux Administration & DevOps Internal Mechanics
 
-> A deep-dive reference guide and knowledge base covering low-level Linux kernel concepts, process lifecycle, memory architecture, resource control (`cgroups`), terminal auditing, system call tracing (`strace`), and network streaming (`netcat`) — annotated with real-world DevOps production triage scenarios.
+> A deep-dive reference guide and knowledge base covering low-level Linux kernel concepts, filesystem architecture (FHS), inode mechanics, permissions, process lifecycle, memory architecture, resource control (`cgroups`), terminal auditing, system call tracing (`strace`), and network streaming (`netcat`) — annotated with real-world DevOps production triage scenarios.
 
 ---
 
@@ -8,6 +8,7 @@
 
 | Part | Document | Primary Focus Areas | Key Commands & Concepts |
 | :---: | :--- | :--- | :--- |
+| **00** | [**`notes_1.md`**](file:///C:/Users/kshit/cs/linux/notes_1.md) | **Filesystem, Permissions & Inodes** | FHS (`/`, `/var`, `/proc`), `ls -la`, 7 File Types, `cp -a`, Inode Table vs Dentries, `ln` (Hard vs Soft Links), `chmod` (Octal/SUID/SGID/Sticky), `less`, `tail -F`, `find` |
 | **01** | [**`commands.md`**](file:///C:/Users/kshit/cs/linux/commands.md) | **Sessions, Users & Cgroup Slices** | `w`, `loginctl`, `useradd`, `usermod`, `systemd-logind`, `user.slice`, `session-*.scope` |
 | **02** | [**`commands_2.md`**](file:///C:/Users/kshit/cs/linux/commands_2.md) | **Job Control, Signals & Task Limits** | GNU Readline (`Ctrl+U`/`K`), `tlog`, `jobs`, `nohup`, `kill` (`SIGTERM`/`SIGKILL`), `systemctl edit`, `TasksMax` |
 | **03** | [**`commands_3.md`**](file:///C:/Users/kshit/cs/linux/commands_3.md) | **Process Introspection & Scheduling** | `ps aux`, `top` (CPU states `us`/`sy`/`wa`/`st`), `STAT` codes (`R`, `S`, `D`, `Z`), `nice`, `renice` |
@@ -22,8 +23,8 @@
 ```
 +───────────────────────────────────────────────────────────────────────────+
 |                                USER SPACE                                 |
-|  CLI Tools (date, ps)      Applications (Go/Node/Python)     Multiplexer  |
-|  [ commands.md, 3.md ]        [ commands_5.md ]            [ commands_4.md ]
+|  File Tools (ls, find)     CLI Tools (date, ps)      Applications (Go/Node)|
+|  [ notes_1.md ]             [ commands.md, 3.md ]     [ commands_5.md ]   |
 |  ───────────────────────────────────────────────────────────────────────  |
 |          Standard C Library / POSIX Wrappers (glibc, musl)                |
 +───────────────────────────────────────────────────────────────────────────+
@@ -36,11 +37,12 @@
 |   ┌────────────────────────┐  ┌───────────────────────┐  ┌──────────────┐ |
 |   │ Task & CPU Scheduler   │  │ Virtual Memory & Page │  │ File Systems │ |
 |   │ (nice/renice - 3.md)   │  │ Tables (PSS/RSS-4.md) │  │ & VFS Driver │ |
-|   └────────────────────────┘  └───────────────────────┘  └──────────────┘ |
-|   ┌────────────────────────┐  ┌───────────────────────┐  ┌──────────────┐ |
-|   │ Cgroups & Resource     │  │ Socket Tables & Buffers│ │ Network Stack│ |
-|   │ Slices (1.md & 2.md)   │  │ (5-Tuple Sockets-6.md)│  │ (IP / TCP/UDP│ |
-|   └────────────────────────┘  └───────────────────────┘  └──────────────┘ |
+|   └────────────────────────┘  └───────────────────────┘  │ (notes_1.md) │ |
+|   ┌────────────────────────┐  ┌───────────────────────┐  └──────────────┘ |
+|   │ Cgroups & Resource     │  │ Socket Tables & Buffers│ ┌──────────────┐ |
+|   │ Slices (1.md & 2.md)   │  │ (5-Tuple Sockets-6.md)│  │ Network Stack│ |
+|   └────────────────────────┘  └───────────────────────┘  │ (IP / TCP/UDP│ |
+|                                                          └──────────────┘ |
 +───────────────────────────────────────────────────────────────────────────+
                                       │
 +───────────────────────────────────────────────────────────────────────────+
@@ -52,6 +54,15 @@
 ---
 
 ## 🔍 Detailed Chapter Summaries
+
+### 📖 [Foundations (Part 0): Filesystem Architecture, Permissions & File Operations](file:///C:/Users/kshit/cs/linux/notes_1.md)
+- **The "Everything is a File" Philosophy & FHS:** Single root namespace (`/`), standard directory breakdown (`/usr/bin`, `/etc`, `/var`, `/proc`, `/dev`), and absolute vs relative path mechanics.
+- **File & Directory Inspection (`ls`, `file`):** Deconstructing `ls -l` metadata, identifying the 7 Linux file types (`-`, `d`, `l`, `c`, `b`, `s`, `p`), and verifying file types via header magic numbers.
+- **Core Operations & Shell Globbing:** Timestamp management (`touch`), safe directory generation (`mkdir -p`), atomic moves/renames (`mv`), archive copies (`cp -a`), shell globbing (`*`, `?`, `[...]`), and brace expansion (`{1..10}`).
+- **Content Inspection & Live Log Streaming:** Lazy-loaded pagination with `less`, line slicing (`head`, `tail`), and live log streaming (`tail -f` vs `tail -F` with logrotate handling).
+- **Inodes, Hard Links & Symbolic Links:** Storage mechanics (Inode table vs Data Blocks vs Dentries), hard link reference counting, symbolic link pointers, and zero-downtime Blue/Green deployments (`ln -sfn`).
+- **Linux Permission & Ownership Architecture:** User/Group/Other triad, file vs directory permission semantics, octal calculations (`755`, `644`, `600`, `700`), ownership management (`chown`, `chgrp`), and special bits (SUID `4000`, SGID `2000`, Sticky Bit `1000`).
+- **Advanced Batch Search (`find`):** Searching by name, type, size, timestamps (`-mtime`, `-mmin`), security audits (`-perm`), and automated batch actions (`-exec ... {} +`, `-delete`).
 
 ### 📖 [Part 1: Sessions, User Administration & Cgroups](file:///C:/Users/kshit/cs/linux/commands.md)
 - **User Activity & Load Averages (`w`):** Deconstructing system clock, uptime, joint CPU (`JCPU`), process CPU (`PCPU`), and the 1/5/15-minute load average formulas.
@@ -96,6 +107,10 @@
 
 | Scenario / Production Symptom | Diagnostic Command | Root Cause & Resolution Path |
 | :--- | :--- | :--- |
+| **Disk Space 100% Full on `/var`** | `df -h /var` $\rightarrow$ `du -ah /var \| sort -rh \| head -n 10` | Runaway logs or container layers. Safely truncate unlinked open logs with `truncate -s 0 <file>` without breaking active daemons. |
+| **SSH Key Permission Denied (`0644 too open`)** | `chmod 700 ~/.ssh && chmod 600 ~/.ssh/id_rsa` | SSH client refuses open keys. Hardens permissions to owner-only read/write. |
+| **Live Log Following Broken After Logrotate** | `tail -F /var/log/nginx/access.log` | Uses `-F` (capital F) to track by filename and automatically reconnect after file rotation, preventing lost logs. |
+| **Zero-Downtime Application Version Switch** | `ln -sfn /var/www/releases/v1.2.0 /var/www/current` | Atomically updates the target directory symlink in 1 millisecond. |
 | **High CPU Alert (System Time Spike `%sy`)** | `top` $\rightarrow$ `pidstat -w 1` $\rightarrow$ `sudo strace -c -p <PID>` | Detects excessive system calls / mode switching. Fix by adding I/O buffering. |
 | **Process Frozen / 0% CPU Consumption** | `sudo strace -p <PID> -f -tt -T` | Identifies blocking system calls (`connect()`, `futex()`, `read()`) waiting on dead sockets or unreleased mutexes. |
 | **Verify Firewall / Security Group Blocking** | `nc -zv -w 3 <host> <port>` | Distinguishes `Connection timed out` (firewall dropping) from `Connection refused` (service down). |
@@ -109,7 +124,7 @@
 
 ## 💡 How to Use These Notes
 
-1. **Sequential Study:** Read from Part 1 through Part 6 for a structured progression from Linux user-space management down to kernel system calls, memory internals, and network streaming.
+1. **Sequential Study:** Read from Part 0 through Part 6 for a structured progression from Linux filesystem foundations and user-space management down to kernel system calls, memory internals, and network streaming.
 2. **On-Call Reference:** Jump directly to the **DevOps Real-Time Scenarios** and **Troubleshooting Cheat Sheets** at the end of each module during production incidents.
 3. **Hands-On Verification:** Run the included commands in a local Linux/WSL2 environment to observe real-time system behaviors, socket states, and network stream redirections.
 
