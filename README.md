@@ -1,6 +1,6 @@
 # 🐧 Linux Administration & DevOps Internal Mechanics
 
-> A deep-dive reference guide and knowledge base covering low-level Linux kernel concepts, process lifecycle, memory architecture, resource control (`cgroups`), terminal auditing, and system call tracing (`strace`) — annotated with real-world DevOps production triage scenarios.
+> A deep-dive reference guide and knowledge base covering low-level Linux kernel concepts, process lifecycle, memory architecture, resource control (`cgroups`), terminal auditing, system call tracing (`strace`), and network streaming (`netcat`) — annotated with real-world DevOps production triage scenarios.
 
 ---
 
@@ -13,6 +13,7 @@
 | **03** | [**`commands_3.md`**](file:///C:/Users/kshit/cs/linux/commands_3.md) | **Process Introspection & Scheduling** | `ps aux`, `top` (CPU states `us`/`sy`/`wa`/`st`), `STAT` codes (`R`, `S`, `D`, `Z`), `nice`, `renice` |
 | **04** | [**`commands_4.md`**](file:///C:/Users/kshit/cs/linux/commands_4.md) | **Multiplexing & Memory Internals** | `tmux` architecture, `ps -eo` custom formatting, `VSZ` vs `RSS` vs `PSS` vs `USS`, `/proc/[PID]/smaps` |
 | **05** | [**`commands_5.md`**](file:///C:/Users/kshit/cs/linux/commands_5.md) | **Syscalls, Kernel Space & `strace`** | Kernel vs User Space (Ring 0 vs 3), Context Switching, `glibc` vs Syscalls, `strace`, `strace -c`, I/O buffering |
+| **06** | [**`commands_6.md`**](file:///C:/Users/kshit/cs/linux/commands_6.md) | **Network Sockets, Streaming & Netcat** | IP vs Ports, 5-Tuple Sockets, Socket Lifecycle (`socket`/`bind`/`listen`), `nc`, Pipes `\| nc`, `-k` Keep-Open |
 
 ---
 
@@ -36,10 +37,10 @@
 |   │ Task & CPU Scheduler   │  │ Virtual Memory & Page │  │ File Systems │ |
 |   │ (nice/renice - 3.md)   │  │ Tables (PSS/RSS-4.md) │  │ & VFS Driver │ |
 |   └────────────────────────┘  └───────────────────────┘  └──────────────┘ |
-|   ┌────────────────────────┐  ┌─────────────────────────────────────────┐ |
-|   │ Cgroups & Resource     │  │ Systemd Hierarchy (PID 1)               │ |
-|   │ Slices (1.md & 2.md)   │  │ (system.slice, user.slice, scopes)      │ |
-|   └────────────────────────┘  └─────────────────────────────────────────┘ |
+|   ┌────────────────────────┐  ┌───────────────────────┐  ┌──────────────┐ |
+|   │ Cgroups & Resource     │  │ Socket Tables & Buffers│ │ Network Stack│ |
+|   │ Slices (1.md & 2.md)   │  │ (5-Tuple Sockets-6.md)│  │ (IP / TCP/UDP│ |
+|   └────────────────────────┘  └───────────────────────┘  └──────────────┘ |
 +───────────────────────────────────────────────────────────────────────────+
                                       │
 +───────────────────────────────────────────────────────────────────────────+
@@ -83,6 +84,12 @@
 - **Context Switching & Performance Optimization:** Mode switches vs process switches, cache thrashing, and why unbuffered I/O loops degrade algorithms regardless of Big-O complexity.
 - **Syscall Tracing (`strace` & `strace -c`):** Phase-by-phase trace dissection (`execve`, ELF dynamic linker `ld.so`, locale fallback, timezone reading, and standard output `write`), plus real-time profiling metrics.
 
+### 📖 [Part 6: Network Sockets, Streaming & Netcat](file:///C:/Users/kshit/cs/linux/commands_6.md)
+- **Transport Layer Multiplexing:** Why IP addresses alone cannot route to processes, port ranges (0-65535), privileged ports (<1024), and the 5-Tuple socket connection model.
+- **Kernel Socket Architecture:** Sockets as file descriptors, kernel socket buffers (`sk_buff`), and the complete syscall lifecycle (`socket`, `bind`, `listen`, `accept`, `connect`).
+- **Netcat Mechanics (`nc`):** Flavor variations (`openbsd` vs `traditional` vs `ncat`), bidirectional terminal chat, and persistent listeners (`-k` / `--keep-open`).
+- **Network Streaming & Remote I/O:** Unix pipes across hosts (`| nc`), zero-encryption high-speed file transfers (`<` and `>`), append logging (`>>`), streaming directory trees with `tar | nc`, port scanning (`-zv`), and raw HTTP/TCP banner grabbing.
+
 ---
 
 ## 🛠️ DevOps Production Incident Response Playbook
@@ -91,6 +98,8 @@
 | :--- | :--- | :--- |
 | **High CPU Alert (System Time Spike `%sy`)** | `top` $\rightarrow$ `pidstat -w 1` $\rightarrow$ `sudo strace -c -p <PID>` | Detects excessive system calls / mode switching. Fix by adding I/O buffering. |
 | **Process Frozen / 0% CPU Consumption** | `sudo strace -p <PID> -f -tt -T` | Identifies blocking system calls (`connect()`, `futex()`, `read()`) waiting on dead sockets or unreleased mutexes. |
+| **Verify Firewall / Security Group Blocking** | `nc -zv -w 3 <host> <port>` | Distinguishes `Connection timed out` (firewall dropping) from `Connection refused` (service down). |
+| **Emergency Log / Core Dump Extraction** | `nc -l 9999 > core.dump` $\leftarrow$ `nc <ip> 9999 < core.dump` | Direct unencrypted data extraction from minimal/distroless containers without SSH/SCP. |
 | **Container OOM Killed (Exit Code 137)** | `grep -i oom /var/log/syslog` $\rightarrow$ inspect `USS` in `/proc/<PID>/smaps` | Identifies true unshared memory growth rather than shared library allocations. |
 | **Unkillable Process in `D` State** | `ps -eo pid,stat,wchan:20,cmd \| grep D` | Process is stuck waiting on physical hardware I/O or a frozen NFS mount. Kill the underlying I/O, not the process. |
 | **Silent App Startup Failure / Missing Config** | `strace -e trace=openat,access ./app` | Pinpoints exactly which file paths the binary probed and distinguishes `ENOENT` (not found) from `EACCES` (permission denied). |
@@ -100,9 +109,9 @@
 
 ## 💡 How to Use These Notes
 
-1. **Sequential Study:** Read from Part 1 through Part 5 for a structured progression from Linux user-space management down to kernel system call mechanics.
+1. **Sequential Study:** Read from Part 1 through Part 6 for a structured progression from Linux user-space management down to kernel system calls, memory internals, and network streaming.
 2. **On-Call Reference:** Jump directly to the **DevOps Real-Time Scenarios** and **Troubleshooting Cheat Sheets** at the end of each module during production incidents.
-3. **Hands-On Verification:** Run the included commands in a local Linux/WSL2 environment to observe real-time system behaviors, cgroup hierarchies, and process states.
+3. **Hands-On Verification:** Run the included commands in a local Linux/WSL2 environment to observe real-time system behaviors, socket states, and network stream redirections.
 
 ---
 
