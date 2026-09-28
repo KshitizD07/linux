@@ -1,6 +1,6 @@
 # 🐧 Linux Administration & DevOps Internal Mechanics
 
-> A deep-dive reference guide and knowledge base covering low-level Linux kernel concepts, filesystem architecture (FHS), inode mechanics, permissions, process lifecycle, memory architecture, resource control (`cgroups`), terminal auditing, system call tracing (`strace`), and network streaming (`netcat`) — annotated with real-world DevOps production triage scenarios.
+> A deep-dive reference guide and knowledge base covering low-level Linux kernel concepts, filesystem architecture (FHS), inode mechanics, permissions, process lifecycle, memory architecture, resource control (`cgroups`), terminal auditing, system call tracing (`strace`), network streaming (`netcat`), kernel sandboxing (`seccomp`), file integrity monitoring (`inotify` vs `auditd`), and `/proc` pseudo-filesystem internals — annotated with real-world DevOps production triage scenarios.
 
 ---
 
@@ -15,6 +15,7 @@
 | **04** | [**`commands_4.md`**](file:///C:/Users/kshit/cs/linux/commands_4.md) | **Multiplexing & Memory Internals** | `tmux` architecture, `ps -eo` custom formatting, `VSZ` vs `RSS` vs `PSS` vs `USS`, `/proc/[PID]/smaps` |
 | **05** | [**`commands_5.md`**](file:///C:/Users/kshit/cs/linux/commands_5.md) | **Syscalls, Kernel Space & `strace`** | Kernel vs User Space (Ring 0 vs 3), Context Switching, `glibc` vs Syscalls, `strace`, `strace -c`, I/O buffering |
 | **06** | [**`commands_6.md`**](file:///C:/Users/kshit/cs/linux/commands_6.md) | **Network Sockets, Streaming & Netcat** | IP vs Ports, 5-Tuple Sockets, Socket Lifecycle (`socket`/`bind`/`listen`), `nc`, Pipes `\| nc`, `-k` Keep-Open |
+| **07** | [**`commands_7.md`**](file:///C:/Users/kshit/cs/linux/commands_7.md) | **Syscall Auditing, Sandboxing & `/proc`** | `strace -c`, DAC vs MAC, `seccomp` BPF filters, `inotifywait`, `auditctl`/`auditd`, `/proc/<PID>/` (`fd`, `maps`, `environ`, `status`) |
 
 ---
 
@@ -30,7 +31,8 @@
 +───────────────────────────────────────────────────────────────────────────+
                                       │
                          SYSCALL TRAP (`syscall`)
-                         [ Traced via `strace` in 5.md ]
+                         [ Sandboxed by Seccomp (7.md) ]
+                         [ Traced via `strace` in 5.md & 7.md ]
                                       │
 +───────────────────────────────────────────────────────────────────────────+
 |                               KERNEL SPACE                                |
@@ -42,6 +44,10 @@
 |   │ Cgroups & Resource     │  │ Socket Tables & Buffers│ ┌──────────────┐ |
 |   │ Slices (1.md & 2.md)   │  │ (5-Tuple Sockets-6.md)│  │ Network Stack│ |
 |   └────────────────────────┘  └───────────────────────┘  │ (IP / TCP/UDP│ |
+|   ┌────────────────────────┐  ┌───────────────────────┐  └──────────────┘ |
+|   │ Security Subsystems    │  │ Virtual Procfs Layer  │ ┌──────────────┐ |
+|   │ (DAC, MAC, Seccomp 7)  │  │ (/proc/<PID>/ - 7.md) │  │ Inotify/Audit│ |
+|   └────────────────────────┘  └───────────────────────┘  │ (inotify 7)  │ |
 |                                                          └──────────────┘ |
 +───────────────────────────────────────────────────────────────────────────+
                                       │
@@ -101,6 +107,14 @@
 - **Netcat Mechanics (`nc`):** Flavor variations (`openbsd` vs `traditional` vs `ncat`), bidirectional terminal chat, and persistent listeners (`-k` / `--keep-open`).
 - **Network Streaming & Remote I/O:** Unix pipes across hosts (`| nc`), zero-encryption high-speed file transfers (`<` and `>`), append logging (`>>`), streaming directory trees with `tar | nc`, port scanning (`-zv`), and raw HTTP/TCP banner grabbing.
 
+### 📖 [Part 7: Syscall Auditing, Kernel Sandboxing & Process Internals](file:///C:/Users/kshit/cs/linux/commands_7.md)
+- **System Call Profiling (`strace -c`):** Intercepting and profiling application system calls with latency analysis (`date` binary and `nc -l` socket listeners).
+- **Core Syscall Mechanics:** Deep dives into `execve`, `openat`, `mmap`, `mprotect`, `brk`, `socket`, `bind`, `listen`, and `accept4`.
+- **Tri-Layer Security Architecture (DAC vs MAC vs Seccomp):** Discretionary permissions (`chmod`/`chown`), Mandatory Access Control (SELinux/AppArmor), and kernel Berkeley Packet Filter (`BPF`) syscall sandboxing (`seccomp`).
+- **Container Hardening:** Custom Seccomp JSON profile creation for Docker and Kubernetes to prevent container breakout vulnerabilities.
+- **File Integrity & Kernel Auditing:** Inode event monitoring with `inotifywait`, enterprise auditing with `auditctl`/`auditd`, and differences between WSL2 and native Linux audit subsystems.
+- **Process Anatomy & `/proc` Pseudo-Filesystem:** PID allocation via `task_struct`, in-memory `procfs` virtual mounting, and zero-downtime file descriptor inspection (`cmdline`, `environ`, `fd/`, `maps`, `status`, `exe`).
+
 ---
 
 ## 🛠️ DevOps Production Incident Response Playbook
@@ -119,12 +133,15 @@
 | **Unkillable Process in `D` State** | `ps -eo pid,stat,wchan:20,cmd \| grep D` | Process is stuck waiting on physical hardware I/O or a frozen NFS mount. Kill the underlying I/O, not the process. |
 | **Silent App Startup Failure / Missing Config** | `strace -e trace=openat,access ./app` | Pinpoints exactly which file paths the binary probed and distinguishes `ENOENT` (not found) from `EACCES` (permission denied). |
 | **Rogue Fork Bomb / Process Exhaustion** | `systemctl status user-1000.slice` | Systemd cgroup `TasksMax` threshold reached; prevents host kernel panic and isolates runaway scripts to the user slice. |
+| **Recover Accidentally Deleted Open File** | `cp /proc/<PID>/fd/<FD_NUM> /backup/recovered_file` | Restores active database or log files deleted from disk while the process holding the file descriptor is still alive. |
+| **Detect Unauthorized Configuration Drift** | `sudo inotifywait -m -e modify,attrib /etc/nginx/nginx.conf` | Captures real-time file tampering outside CI/CD pipelines and triggers instant webhook alerts. |
+| **Inspect Env Secrets in Distroless Pods** | `cat /proc/<PID>/environ \| tr '\0' '\n'` | Inspects runtime environment variables directly from the host node without installing debugging utilities in the container. |
 
 ---
 
 ## 💡 How to Use These Notes
 
-1. **Sequential Study:** Read from Part 0 through Part 6 for a structured progression from Linux filesystem foundations and user-space management down to kernel system calls, memory internals, and network streaming.
+1. **Sequential Study:** Read from Part 0 through Part 7 for a structured progression from Linux filesystem foundations and user-space management down to kernel system calls, memory internals, network streaming, and kernel security sandboxing.
 2. **On-Call Reference:** Jump directly to the **DevOps Real-Time Scenarios** and **Troubleshooting Cheat Sheets** at the end of each module during production incidents.
 3. **Hands-On Verification:** Run the included commands in a local Linux/WSL2 environment to observe real-time system behaviors, socket states, and network stream redirections.
 
