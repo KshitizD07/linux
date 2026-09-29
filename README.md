@@ -1,6 +1,6 @@
 # 🐧 Linux Administration & DevOps Internal Mechanics
 
-> A deep-dive reference guide and knowledge base covering low-level Linux kernel concepts, filesystem architecture (FHS), inode mechanics, permissions, process lifecycle, memory architecture, resource control (`cgroups`), terminal auditing, system call tracing (`strace`), network streaming (`netcat`), kernel sandboxing (`seccomp`), file integrity monitoring (`inotify` vs `auditd`), and `/proc` pseudo-filesystem internals — annotated with real-world DevOps production triage scenarios.
+> A deep-dive reference guide and knowledge base covering low-level Linux kernel concepts, filesystem architecture (FHS), inode mechanics, permissions, process lifecycle, memory architecture, resource control (`cgroups`), terminal auditing, system call tracing (`strace`), network streaming (`netcat`), kernel sandboxing (`seccomp`), file integrity monitoring (`inotify` vs `auditd`), `/proc` pseudo-filesystem internals, memory leak detection (`valgrind`), page caching (Hit vs Miss), bash privilege redirection, SUID privilege escalation, and `systemd` / `systemctl` unit architecture — annotated with real-world DevOps production triage scenarios.
 
 ---
 
@@ -16,6 +16,7 @@
 | **05** | [**`commands_5.md`**](file:///C:/Users/kshit/cs/linux/commands_5.md) | **Syscalls, Kernel Space & `strace`** | Kernel vs User Space (Ring 0 vs 3), Context Switching, `glibc` vs Syscalls, `strace`, `strace -c`, I/O buffering |
 | **06** | [**`commands_6.md`**](file:///C:/Users/kshit/cs/linux/commands_6.md) | **Network Sockets, Streaming & Netcat** | IP vs Ports, 5-Tuple Sockets, Socket Lifecycle (`socket`/`bind`/`listen`), `nc`, Pipes `\| nc`, `-k` Keep-Open |
 | **07** | [**`commands_7.md`**](file:///C:/Users/kshit/cs/linux/commands_7.md) | **Syscall Auditing, Sandboxing & `/proc`** | `strace -c`, DAC vs MAC, `seccomp` BPF filters, `inotifywait`, `auditctl`/`auditd`, `/proc/<PID>/` (`fd`, `maps`, `environ`, `status`) |
+| **08** | [**`commands_8.md`**](file:///C:/Users/kshit/cs/linux/commands_8.md) | **Memory Leaks, Privileges & Systemd** | `valgrind` (Memcheck), Stack vs Heap (`brk`/`mmap`), Page Cache Hit vs Miss, Minor/Major Page Faults, Bash redirection (`>` vs `sudo tee`), SUID escalation, `stty` flow control, `systemd` unit files (`systemctl`, `journalctl`) |
 
 ---
 
@@ -28,17 +29,19 @@
 |  [ notes_1.md ]             [ commands.md, 3.md ]     [ commands_5.md ]   |
 |  ───────────────────────────────────────────────────────────────────────  |
 |          Standard C Library / POSIX Wrappers (glibc, musl)                |
+|          Memory Allocators (malloc/free - Stack vs Heap [8.md])           |
 +───────────────────────────────────────────────────────────────────────────+
                                       │
                          SYSCALL TRAP (`syscall`)
                          [ Sandboxed by Seccomp (7.md) ]
                          [ Traced via `strace` in 5.md & 7.md ]
+                         [ Memory Allocation via brk/mmap in 8.md ]
                                       │
 +───────────────────────────────────────────────────────────────────────────+
 |                               KERNEL SPACE                                |
 |   ┌────────────────────────┐  ┌───────────────────────┐  ┌──────────────┐ |
 |   │ Task & CPU Scheduler   │  │ Virtual Memory & Page │  │ File Systems │ |
-|   │ (nice/renice - 3.md)   │  │ Tables (PSS/RSS-4.md) │  │ & VFS Driver │ |
+|   │ (nice/renice - 3.md)   │  │ Cache / MMU (4 & 8.md)│  │ & VFS Driver │ |
 |   └────────────────────────┘  └───────────────────────┘  │ (notes_1.md) │ |
 |   ┌────────────────────────┐  ┌───────────────────────┐  └──────────────┘ |
 |   │ Cgroups & Resource     │  │ Socket Tables & Buffers│ ┌──────────────┐ |
@@ -46,9 +49,12 @@
 |   └────────────────────────┘  └───────────────────────┘  │ (IP / TCP/UDP│ |
 |   ┌────────────────────────┐  ┌───────────────────────┐  └──────────────┘ |
 |   │ Security Subsystems    │  │ Virtual Procfs Layer  │ ┌──────────────┐ |
-|   │ (DAC, MAC, Seccomp 7)  │  │ (/proc/<PID>/ - 7.md) │  │ Inotify/Audit│ |
+|   │ (DAC, MAC, SUID [4,8]) │  │ (/proc/<PID>/ - 7.md) │  │ Inotify/Audit│ |
 |   └────────────────────────┘  └───────────────────────┘  │ (inotify 7)  │ |
-|                                                          └──────────────┘ |
+|   ┌────────────────────────┐                             └──────────────┘ |
+|   │ Systemd PID 1 & Units  │                                              |
+|   │ (.service / systemctl 8│                                              |
+|   └────────────────────────┘                                              |
 +───────────────────────────────────────────────────────────────────────────+
                                       │
 +───────────────────────────────────────────────────────────────────────────+
@@ -115,6 +121,14 @@
 - **File Integrity & Kernel Auditing:** Inode event monitoring with `inotifywait`, enterprise auditing with `auditctl`/`auditd`, and differences between WSL2 and native Linux audit subsystems.
 - **Process Anatomy & `/proc` Pseudo-Filesystem:** PID allocation via `task_struct`, in-memory `procfs` virtual mounting, and zero-downtime file descriptor inspection (`cmdline`, `environ`, `fd/`, `maps`, `status`, `exe`).
 
+### 📖 [Part 8: Memory Internals, Privilege Mechanics, Terminal I/O, & Systemd Service Architecture](file:///C:/Users/kshit/cs/linux/commands_8.md)
+- **Memory Allocation & Leak Detection (`valgrind`):** Stack vs. Heap layout, `brk()` vs. `mmap()` syscalls, compiling with `-g`, and diagnosing `definitely lost`, `indirectly lost`, and `possibly lost` leaks via Memcheck.
+- **Memory Hierarchy & Page Caching (Hit vs. Miss):** Register/Cache/RAM/Storage pyramid, Minor (Soft) vs. Major (Hard) page faults, dirty page flushing (`kswapd`), and real-time monitoring via `free -h` and `vmstat 1 5`.
+- **Bash Redirection Mechanics & Privileged Execution:** Shell parsing order vs execution, why `sudo cmd > /root/file` fails, and robust solutions via `sudo bash -c` and `cmd | sudo tee`.
+- **Linux Special Permissions (SUID, SGID, & Sticky Bit):** Special octal architecture (`4000`, `2000`, `1000`), legitimate SUID uses (`passwd`), security vulnerabilities of SUID binaries (`chmod u+s /usr/bin/cat`), and audit commands.
+- **Terminal Flow Control & Password Input Masking:** Software flow control (`Ctrl+S` XOFF / `Ctrl+Q` XON), disabling flow control (`stty -ixon`), and masking sensitive inputs via `stty -echo` and `read -s`.
+- **Systemd & Systemctl Service Architecture:** Init system (PID 1), unit types (`.service`, `.target`, `.socket`, `.timer`), complete anatomy of production `.service` unit files (`[Unit]`, `[Service]`, `[Install]`), daemon lifecycle operations (`start`, `stop`, `restart`, `reload`, `enable`, `mask`, `daemon-reload`), and live log inspection with `journalctl`.
+
 ---
 
 ## 🛠️ DevOps Production Incident Response Playbook
@@ -127,6 +141,11 @@
 | **Zero-Downtime Application Version Switch** | `ln -sfn /var/www/releases/v1.2.0 /var/www/current` | Atomically updates the target directory symlink in 1 millisecond. |
 | **High CPU Alert (System Time Spike `%sy`)** | `top` $\rightarrow$ `pidstat -w 1` $\rightarrow$ `sudo strace -c -p <PID>` | Detects excessive system calls / mode switching. Fix by adding I/O buffering. |
 | **Process Frozen / 0% CPU Consumption** | `sudo strace -p <PID> -f -tt -T` | Identifies blocking system calls (`connect()`, `futex()`, `read()`) waiting on dead sockets or unreleased mutexes. |
+| **Terminal Completely Frozen & Unresponsive** | `Ctrl + Q` (or add `stty -ixon` to profile) | Terminal output paused by software flow control (`Ctrl + S` / XOFF). `Ctrl + Q` immediately restores rendering. |
+| **Permission Denied Writing to Root File with `sudo`** | `cmd \| sudo tee /path/to/root_file > /dev/null` | Shell redirects `stdout` with user permissions before `sudo` executes. `sudo tee` ensures elevated write privileges. |
+| **Microservice Memory Leak / `OOMKilled` (Exit 137)** | `valgrind --leak-check=full --tool=memcheck ./app` | Traces unreleased heap blocks to exact file line numbers and prevents container memory exhaustion. |
+| **Database Latency Spike / High `%wa` I/O Wait** | `vmstat 1 5` $\rightarrow$ `sar -B 1 5` | Working set exceeds RAM, causing high major page fault rates (`majflt/s`). Tune buffer cache and `vm.swappiness`. |
+| **Unauthorized SUID Binaries / Privilege Escalation** | `find / -perm -4000 -type f 2>/dev/null` | Audits binaries with SUID bits set. Strip unauthorized bits with `chmod u-s <file>` to enforce CIS compliance. |
 | **Verify Firewall / Security Group Blocking** | `nc -zv -w 3 <host> <port>` | Distinguishes `Connection timed out` (firewall dropping) from `Connection refused` (service down). |
 | **Emergency Log / Core Dump Extraction** | `nc -l 9999 > core.dump` $\leftarrow$ `nc <ip> 9999 < core.dump` | Direct unencrypted data extraction from minimal/distroless containers without SSH/SCP. |
 | **Container OOM Killed (Exit Code 137)** | `grep -i oom /var/log/syslog` $\rightarrow$ inspect `USS` in `/proc/<PID>/smaps` | Identifies true unshared memory growth rather than shared library allocations. |
@@ -136,12 +155,13 @@
 | **Recover Accidentally Deleted Open File** | `cp /proc/<PID>/fd/<FD_NUM> /backup/recovered_file` | Restores active database or log files deleted from disk while the process holding the file descriptor is still alive. |
 | **Detect Unauthorized Configuration Drift** | `sudo inotifywait -m -e modify,attrib /etc/nginx/nginx.conf` | Captures real-time file tampering outside CI/CD pipelines and triggers instant webhook alerts. |
 | **Inspect Env Secrets in Distroless Pods** | `cat /proc/<PID>/environ \| tr '\0' '\n'` | Inspects runtime environment variables directly from the host node without installing debugging utilities in the container. |
+| **Systemd Service Ignores Configuration Edits** | `sudo systemctl daemon-reload` | Re-reads all unit files from disk into systemd memory after configuration edits. |
 
 ---
 
 ## 💡 How to Use These Notes
 
-1. **Sequential Study:** Read from Part 0 through Part 7 for a structured progression from Linux filesystem foundations and user-space management down to kernel system calls, memory internals, network streaming, and kernel security sandboxing.
+1. **Sequential Study:** Read from Part 0 through Part 8 for a structured progression from Linux filesystem foundations and user-space management down to kernel system calls, memory internals, network streaming, and kernel security sandboxing.
 2. **On-Call Reference:** Jump directly to the **DevOps Real-Time Scenarios** and **Troubleshooting Cheat Sheets** at the end of each module during production incidents.
 3. **Hands-On Verification:** Run the included commands in a local Linux/WSL2 environment to observe real-time system behaviors, socket states, and network stream redirections.
 
